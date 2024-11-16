@@ -9,6 +9,15 @@ Serie Animada: Gravity Falls
  premisa : Mabel se despierta y no encuentra a Pato,su mascota, a su lado
  así que en este juego tendras que ir visitando habitaciones para encontrarlo
  y obtener el final esperado.
+
+Hola Profe! Le queríamos pedir disculpas por el tp sin terminar, tenemos un objetivo 
+en el juego, es que Mabel pueda andar por la casa y buscar pistas que la lleven a 
+encontrar a Pato, en su busqueda se va a encontrar con Bill y pensabamos el jugador
+tenga que esquivar los rayos que tire.
+Tendrá distintos finales así como en la aventura gráfica pero nos disculpamos de nuevo
+por entregar incompleto Dx.
+ ¡Muchas gracias por leernos!
+   Que tenga un buen día :D.
 */
 
 
