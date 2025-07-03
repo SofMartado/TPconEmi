@@ -15,6 +15,7 @@ let mic, fft, amp;
 let gestor;
 let altoGestor = 100;
 let anchoGestor = 400;
+let cooldown = 0;
 
 
 function preload() {
@@ -122,6 +123,22 @@ function draw() {
 
     let retornoAudio = "Amplitud:" + nfc(amp, 3);
     text(retornoAudio, width / 2, width / 2);
+
+    let umbralAplauso = 0.8; // ajusta según tu micro
+
+    if (cooldown > 0) {
+        cooldown--;
+    }
+
+    // Detectar aplauso con la derivada
+    if (gestor.derivada > umbralAplauso && cooldown === 0) {
+        for (let i = 0; i < boxes.length; i++) {
+            Matter.World.remove(world, boxes[i].body);
+        }
+        boxes = [];
+        cooldown = 30; // espera 30 frames (~0.5 seg)
+        print("¡Aplauso detectado! Cajas eliminadas.");
+    }
 
     // Determina el nuevo estado del sonido
     let nuevoEstado;
