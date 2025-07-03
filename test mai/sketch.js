@@ -6,6 +6,7 @@ let boxImages = [];
 const SCALE = 0.5; // Cambia este valor para ajustar la escala
 let lastBoxTime = 0; // Agrega esto al inicio del archivo
 const BOX_INTERVAL = 200; // milisegundos entre cajas   
+let estadoSonido = "silencio";
 
 let amp_min = 0.000;
 let amp_max = 0.555;
@@ -122,33 +123,52 @@ function draw() {
     let retornoAudio = "Amplitud:" + nfc(amp, 3);
     text(retornoAudio, width / 2, width / 2);
 
-    let bass = fft.getEnergy("bass");
-    let middle = fft.getEnergy("mid");
-    let treble = fft.getEnergy("treble");
-
-    let imgIndex, img, w, h, angle;
-
-    // Asigna imgIndex según el nivel de ruido
-    if (amp > 0.35) { // Ruido fuerte
-        imgIndex = floor(random(4, 8)); // 4, 5, 6, 7
-    } else if (amp > 0.125) { // Ruido medio
-        imgIndex = floor(random(0, 4)); // 0, 1, 2, 3
+    // Determina el nuevo estado del sonido
+    let nuevoEstado;
+    if (amp > 0.03) {
+        nuevoEstado = "fuerte";
+    } else if (amp > 0.01) {
+        nuevoEstado = "medio";
+    } else {
+        nuevoEstado = "silencio";
     }
 
-    if (amp > 0.125 && imgIndex !== undefined && millis() - lastBoxTime > BOX_INTERVAL) {
+    // Si el estado cambia entre "medio" y "fuerte", borra los cuadros anteriores
+    if (
+    (estadoSonido === "medio" && nuevoEstado === "fuerte") ||
+    (estadoSonido === "fuerte" && nuevoEstado === "medio")
+) {
+    for (let i = 0; i < boxes.length; i++) {
+        Matter.World.remove(world, boxes[i].body);
+    }
+    boxes = [];
+}
+    estadoSonido = nuevoEstado;
+
+    // Selección de imágenes y creación de cajas según el estado
+    let imgIndex, img, w, h, angle;
+    if (estadoSonido === "fuerte") {
+        imgIndex = floor(random(4, 8)); // verdes
+    } else if (estadoSonido === "medio") {
+        imgIndex = floor(random(0, 4)); // colores
+    }
+
+    // Solo crear cajas si el estado es "fuerte" o "medio"
+    if ((estadoSonido === "fuerte" || estadoSonido === "medio") && imgIndex !== undefined && millis() - lastBoxTime > BOX_INTERVAL) {
         img = boxImages[imgIndex];
         if (img && img.width && img.height) {
             angle = random(-PI / 8, PI / 8);
             w = img.width * SCALE;
             h = img.height * SCALE;
 
-            if (isSpaceFree(mouseX, mouseY, w, h)) {
-                let box = new Box(mouseX, mouseY, img.width, img.height, imgIndex, angle);
-                boxes.push(box);
-                lastBoxTime = millis();
-            } else {
-                print("¡No hay espacio suficiente!");
-            }
+            let x = random(w / 2, width - w / 2);
+        let y = random(h / 2, height / 2);
+
+            if (isSpaceFree(x, y, w, h)) {
+    let box = new Box(x, y, img.width, img.height, imgIndex, angle);
+    boxes.push(box);
+    lastBoxTime = millis();
+}
         }
     }
 
