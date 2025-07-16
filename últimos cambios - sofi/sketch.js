@@ -1,0 +1,528 @@
+let engine;
+let world;
+let boxes = [];
+let ground;
+let boxImages = [];
+const SCALE = 0.5; 
+let lastBoxTime = 0; 
+const BOX_INTERVAL = 200;  
+let estadoSonido = "silencio";
+let estadoSonidoSimulado = "silencio";
+let crearCaja = false;
+let reiniciarJuego = false;
+let imgIndex = 0;
+
+
+
+
+let amp_min = 0.000;
+let amp_max = 0.555;
+let mic, fft, amp;
+
+let gestor;
+let altoGestor = 100;
+let anchoGestor = 400;
+let cooldown = 0;
+
+let ultimaNotaDetectada = null;
+let audioContext;
+let gestorPitch;
+const minNota = 40;
+const maxNota = 74;
+const model_url = 'https://cdn.jsdelivr.net/gh/ml5js/ml5-data-and-models/models/pitch-detection/crepe/';
+let pitch;
+
+
+let gameState = "pantalla_inicial"; // "pantalla_inicial", "juego"
+let paletas = [
+    {
+        nombre: "Calida",
+        color: "#FF7043", // naranja/cálido
+        imagenes: []
+    },
+    {
+        nombre: "Fria",
+        color: "#42A5F5", // azul/frío
+        imagenes: []
+    },
+    {
+        nombre: "Verde",
+        color: "#66BB6A", // verde
+        imagenes: []
+    }
+];
+let paletaSeleccionada = 0; // índice de la paleta seleccionada
+
+// Variables para la bola de selección
+let bola = {
+    x: 0,
+    y: 60,
+    r: 35,
+    vx: 4,
+    vy: 0,
+    cayendo: false,
+    seleccionada: false
+};
+
+// Variables físicas para la bola y las paletas en la pantalla inicial
+let bolaBody = null;
+let paletaBodies = [];
+let bolaEnMovimientoHorizontal = true; // controla el movimiento horizontal
+let flecha;
+
+let miFuente; //fuente de texto
+
+let Marco;//variable para la img del marco de fondo
+
+function preload() {
+
+    miFuente = loadFont('fuente/fuente2D.ttf');
+
+    Marco = loadImage('marco/FondoMarco.png');
+
+    // Carga imágenes para cada paleta
+    for (let p = 0; p < paletas.length; p++) {
+        for (let i = 0; i <= 7; i++) {
+            // Cambia el path según las nuevas carpetas: img/calida/box0.png, etc.
+            let path = `img/${paletas[p].nombre.toLowerCase()}/box${i}.png`;
+            paletas[p].imagenes[i] = loadImage(path);
+        }
+    }
+}
+
+// Función para desordenar un array (Fisher-Yates shuffle)
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+function setup() {
+    //createCanvas(600, 1000);
+    createCanvas(windowWidth, windowHeight);
+   
+    audioContext = getAudioContext();
+    mic = new p5.AudioIn();
+    gestorPitch = new GestorSenial(minNota, maxNota);
+    mic.start(startPitch);  // ¡muy importante!
+
+    userStartAudio(); // asegúrate de que está acá también
+
+    fft = new p5.FFT();
+    fft.setInput(mic);
+
+    gestor = new GestorSenial(amp_min, amp_max);
+    gestor.dibujarDerivada = true; 
+    engine = Matter.Engine.create();
+    world = engine.world;
+    Matter.Engine.run(engine);
+
+//acá se editó el ancho del piso así de ajusta a kla pantalla (lo ideal)
+   //ground = Matter.Bodies.rectangle(400, height - height/25, 810, 60, { isStatic: true });
+   ground = Matter.Bodies.rectangle(400, height - 35, 810, 60, { isStatic: true });
+    Matter.World.add(world, ground);
+/*
+    // Pared izquierda
+    let wallLeft = Matter.Bodies.rectangle(0, height / 2, 20, height, { isStatic: true });
+    // Pared derecha
+    let wallRight = Matter.Bodies.rectangle(width, height / 2, 20, height, { isStatic: true });
+    // Techo
+    let ceiling = Matter.Bodies.rectangle(width / 2, 0, width, 20, { isStatic: true });
+*/
+
+    // Pared izquierda
+    let wallLeft = Matter.Bodies.rectangle(0, height / 2, width - width/3, height + height/2, { isStatic: true });
+    // Pared derecha
+    let wallRight = Matter.Bodies.rectangle(width, height / 2, width - width/3, height + height/4, { isStatic: true });
+    // Techo
+    let ceiling = Matter.Bodies.rectangle(width / 2, 0, width, 130, { isStatic: true });
+
+    Matter.World.add(world, [wallLeft, wallRight, ceiling]);
+
+    bola.x = bola.r + 10; // Inicia a la izquierda
+    bola.y = 60;
+    bola.vx = 4;
+    bola.vy = 0;
+    bola.cayendo = false;
+    bola.seleccionada = false;
+
+    // Inicializa la física de la bola y paletas para la pantalla inicial
+    crearFisicaPantallaInicial();
+}
+
+function crearFisicaPantallaInicial() {
+    // Elimina cuerpos previos si existen
+    if (bolaBody) Matter.World.remove(world, bolaBody);
+    for (let b of paletaBodies) Matter.World.remove(world, b);
+    paletaBodies = [];
+
+    // Bola física
+    bolaBody = Matter.Bodies.circle(width/3, 60, 35, { //antes era 80 el width //posición a la izq
+        restitution: 0.7, //acá es el rebote
+        friction: 0.05,
+        frictionAir: 0.002,
+        isStatic: true 
+    });
+    Matter.World.add(world, bolaBody);
+
+    // Paletas físicas (rectángulos completos, no solo plataformas)
+    //let btnW = 100, btnH = 100;
+    let btnW = width/10, btnH = width/10; // Ancho y alto de las paletas
+    let spacing = 50;
+    let totalW = paletas.length * btnW + (paletas.length - 1) * spacing;
+    let startX = (width - totalW) / 2 + btnW / 2;
+    let yPaletas = height / 2;
+
+    for (let i = 0; i < paletas.length; i++) {
+        let x = startX + i * (btnW + spacing);
+        // Crea un rectángulo completo para cada paleta
+        let body = Matter.Bodies.rectangle(x, yPaletas, btnW, btnH, {
+            isStatic: true,
+            label: "paleta" + i
+        });
+        paletaBodies.push(body);
+    }
+    Matter.World.add(world, paletaBodies);
+
+    bolaEnMovimientoHorizontal = true; // Reinicia el estado
+}
+
+function Box(x, y, w, h, imgIndex, angle = 0) {
+    this.body = Matter.Bodies.rectangle(x, y, w * SCALE, h * SCALE);
+    Matter.Body.setAngle(this.body, angle); // Aplica la rotación inicial
+    this.w = w * SCALE;
+    this.h = h * SCALE;
+    this.imgIndex = imgIndex;
+    Matter.World.add(world, this.body);
+
+    this.show = function () {
+        let pos = this.body.position;
+        let angle = this.body.angle;
+
+        push();
+        translate(pos.x, pos.y);
+        rotate(angle);
+        imageMode(CENTER);
+        image(boxImages[this.imgIndex], 0, 0, this.w, this.h);
+        pop();
+    }
+}
+
+function isSpaceFree(x, y, w, h) {
+    for (let i = 0; i < boxes.length; i++) {
+        let b = boxes[i];
+        // Calcula los bordes de la nueva caja
+        let leftA = x - w / 2;
+        let rightA = x + w / 2;
+        let topA = y - h / 2;
+        let bottomA = y + h / 2;
+        // Calcula los bordes de la caja existente
+        let pos = b.body.position;
+        let leftB = pos.x - b.w / 2;
+        let rightB = pos.x + b.w / 2;
+        let topB = pos.y - b.h / 2;
+        let bottomB = pos.y + b.h / 2;
+        // Si se superponen, retorna false
+        if (!(leftA > rightB || rightA < leftB || topA > bottomB || bottomA < topB)) {
+            return false;
+        }
+    }
+    // También verifica que esté dentro del canvas
+    if (x - w / 2 < 0 || x + w / 2 > width || y - h / 2 < 0 || y + h / 2 > height) {
+        return false;
+    }
+    return true;
+}
+
+function draw() {
+     background(255);
+
+    if (gameState === "pantalla_inicial") {
+        background(150);
+        textAlign(CENTER, width/70);
+        textFont(miFuente);
+        //textSize(30);
+        textSize(width / 50); // Tamaño de texto proporcional al ancho
+        stroke(20);
+        strokeWeight(3);
+        fill(250,220,0);
+        text("Aplaudi para elegir una paleta de colores", width / 2, 200);
+
+        // Dibuja botones para cada paleta
+        //let btnW = 100, btnH = 100;
+        let btnW = width/10, btnH = width/10; // Ancho y alto de las paletas
+        let spacing = 50;
+        let totalW = paletas.length * btnW + (paletas.length - 1) * spacing;
+        let startX = (width - totalW) / 2 + btnW / 2;
+        let yPaletas = height / 2;
+
+        for (let i = 0; i < paletas.length; i++) {
+            let x = startX + i * (btnW + spacing);
+            fill(paletas[i].color);
+            stroke(20);
+            strokeWeight(3);
+            rectMode(CENTER);
+            rect(x, yPaletas, btnW, btnH, 20);
+            //TEXTO DE LAS PALETAS
+            fill(255);
+            stroke(20);
+            strokeWeight(3);
+            //textSize(20);//tamaño de calido,fria,verde?
+            textSize(width/60); // Tamaño de texto proporcional al ancho
+            text(paletas[i].nombre, x, yPaletas + btnH / 2 + 50);
+        }
+
+        // --- Bola física con movimiento horizontal manual ---
+        let bx = bolaBody.position.x;
+        let by = bolaBody.position.y;
+
+        if (bolaEnMovimientoHorizontal) {
+            // Movimiento horizontal manual
+            bolaBody.isStatic = true;
+            let nextX = bx + bola.vx;
+            if (nextX - 35 < width/4 || nextX + 35 > width - width/4) {
+                bola.vx *= -1;
+            }
+            Matter.Body.setPosition(bolaBody, { x: bx + bola.vx, y: 60 });
+        }
+
+        // Dibuja la bola física SIEMPRE, aunque esté cayendo
+        //push();
+        fill(255, 220, 80);
+        stroke(20);
+        strokeWeight(3);
+        ellipse(bolaBody.position.x, bolaBody.position.y, 70);
+
+        // Rebote lateral solo si la bola está cayendo
+        if (!bolaEnMovimientoHorizontal) {
+            if (bx - 35 < 0 && bolaBody.velocity.x < 0) {
+                Matter.Body.setVelocity(bolaBody, { x: Math.abs(bolaBody.velocity.x), y: bolaBody.velocity.y });
+            }
+            if (bx + 35 > width && bolaBody.velocity.x > 0) {
+                Matter.Body.setVelocity(bolaBody, { x: -Math.abs(bolaBody.velocity.x), y: bolaBody.velocity.y });
+            }
+        }
+
+        // Detectar aplauso en pantalla inicial para hacer caer la bola
+        userStartAudio();
+        amp = mic.getLevel();
+        gestor.actualizar(amp);
+
+        let umbralAplauso = 1; // ajusta según tu micro
+
+        if (cooldown > 0) {
+            cooldown--;
+        }
+
+        if (
+            (gestor.derivada > umbralAplauso && cooldown === 0 && bolaEnMovimientoHorizontal) ||
+            ((mouseIsPressed || keyIsPressed) && bolaEnMovimientoHorizontal && cooldown === 0)
+        ) {
+            bolaEnMovimientoHorizontal = false;
+            Matter.Body.setPosition(bolaBody, { x: bolaBody.position.x, y: 60 });
+            Matter.Body.setVelocity(bolaBody, { x: 0, y: 5 });
+            Matter.Body.setStatic(bolaBody, false);
+            cooldown = 30;
+        }
+
+        // Selección de paleta: la PRIMERA que toque la bola (parte inferior de la bola toca parte superior de la paleta)
+        if (!bolaEnMovimientoHorizontal) {
+            for (let i = 0; i < paletaBodies.length; i++) {
+                let b = paletaBodies[i];
+                //let btnW = 100, btnH = 100;
+                let btnW = width/10, btnH = width/10; // Ancho y alto de las paletas
+                let left = b.position.x - btnW / 2;
+                let right = b.position.x + btnW / 2;
+                let top = b.position.y - btnH / 2;
+                let bottom = b.position.y + btnH / 2;
+                
+                // Detecta si la parte inferior de la bola toca la parte superior de la paleta
+                let bolaBottom = by + 35; // radio de la bola
+                if (
+                    bx > left && bx < right &&
+                    bolaBottom >= top && bolaBottom <= top + 20 // margen de 20px para el contacto
+                ) {
+                    paletaSeleccionada = i;
+                    gameState = "juego";
+                    Matter.World.remove(world, bolaBody);
+                    for (let b of paletaBodies) Matter.World.remove(world, b);
+                    paletaBodies = [];
+                    bolaBody = null;
+
+                    // --- flecha en movimiento ---
+                    flecha = {
+                        x: width / 2,
+                        y: 60, //  cambia de 100 a 60
+                        vx: 4, // VELOCIDAD
+                        moving: true
+                    };
+                    break;
+                }
+            }
+        }
+
+        return;
+    }
+    //pop();
+
+    // --- JUEGO NORMAL ---
+    // Cambia boxImages por la paleta seleccionada
+    boxImages = paletas[paletaSeleccionada].imagenes;
+
+    userStartAudio();
+    amp = mic.getLevel();
+    gestor.actualizar(amp);
+/*
+    let retornoAudio = "Amplitud:" + nfc(amp, 3);
+    text(retornoAudio, width / 2, width / 2);
+*/
+    //let umbralAplauso = 1; // ajusta según tu micro
+
+    if (cooldown > 0) {
+        cooldown--;
+    }
+
+    // Determina el nuevo estado del sonido
+let nota = ultimaNotaDetectada;
+let nuevoEstado;
+
+if (nota >= 66) {
+    nuevoEstado = "agudo";
+} else if (nota >= 56 && nota <= 65) {
+    nuevoEstado = "medio";
+} else if (nota >= 40 && nota <= 55) {
+    nuevoEstado = "grave";
+} else {
+    nuevoEstado = "silencio";
+}
+
+estadoSonido = nuevoEstado;
+
+
+if (estadoSonido === "grave") {
+    let opciones = [0, 1, 4, 7];
+    imgIndex = opciones[Math.floor(random(opciones.length))];
+} else if (estadoSonido === "medio") {
+    let opciones = [5, 6, 3];
+    imgIndex = opciones[Math.floor(random(opciones.length))];
+} else if (estadoSonido === "agudo") {
+    imgIndex = 2;
+}
+
+
+if ((estadoSonido === "grave" || estadoSonido === "medio" || estadoSonido === "agudo") &&
+    imgIndex !== undefined &&
+    millis() - lastBoxTime > BOX_INTERVAL &&
+    (crearCaja || amp > 0.03)) {
+
+        img = boxImages[imgIndex];
+        if (img && img.width && img.height) {
+            angle = random(-PI / 8, PI / 8);
+            w = img.width * SCALE;
+            h = img.height * SCALE;
+
+            // imgs debajo de la flecha
+            let x = flecha.x;
+            let y = flecha.y + 20; // (lo cambie) estaba en 50 
+
+            if (isSpaceFree(x, y, w, h)) {
+                let box = new Box(x, y, img.width, img.height, imgIndex, angle);
+                boxes.push(box);
+                lastBoxTime = millis();
+            }
+        }
+        console.log("imgIndex:", imgIndex, "boxImages:", boxImages, "img:", img);
+    }
+
+    //background(255);
+    for (let i = 0; i < boxes.length; i++) {
+        let box = boxes[i];
+        let pos = box.body.position;
+        let bottom = pos.y + box.h / 2;
+        if (bottom >= ground.position.y - 55 && !box.body.isStatic) {
+            Matter.Body.setStatic(box.body, true);
+        }
+        box.show();
+    }
+    /*//retángulo del piso
+    fill(255);
+    rectMode(CENTER);
+    rect(ground.position.x, ground.position.y, 810, 60);
+    */
+
+     image(Marco, width/4, -25, width - width/1.97, height + 50); // Dibuja el marco de fondo 
+
+    // flecha aparece solo si esta activa
+    if (flecha.moving) {
+        flecha.x += flecha.vx;
+        if (flecha.x < width/3 || flecha.x > width - width/3) {
+            flecha.vx *= -1;
+        }
+    }
+    // dibuja la flecha y se le asigna color segun la paleta
+
+   if (paletaSeleccionada === 0) {
+       push();
+       fill(200, 100, 50);//naranja
+       noStroke();
+      //triangle(flecha.x, flecha.y + 40, flecha.x - 20, flecha.y, flecha.x + 20, flecha.y);
+       triangle(flecha.x, flecha.y + 20, flecha.x - 10, flecha.y, flecha.x + 10, flecha.y);
+       pop();
+   } else if (paletaSeleccionada === 1) {
+    push();
+       fill(50, 100, 200);//azul
+       noStroke();
+      //triangle(flecha.x, flecha.y + 40, flecha.x - 20, flecha.y, flecha.x + 20, flecha.y);
+       triangle(flecha.x, flecha.y + 20, flecha.x - 10, flecha.y, flecha.x + 10, flecha.y);
+       pop();
+   } else if (paletaSeleccionada === 2) {
+    push();
+       fill(50, 200, 100);//verde
+       noStroke();
+      //triangle(flecha.x, flecha.y + 40, flecha.x - 20, flecha.y, flecha.x + 20, flecha.y);
+       triangle(flecha.x, flecha.y + 20, flecha.x - 10, flecha.y, flecha.x + 10, flecha.y);
+       pop();
+   }
+/*//antes se le asignaba solo un color a la flecha
+push();
+fill(200, 100, 50);//naranja
+    noStroke();
+    //triangle(flecha.x, flecha.y + 40, flecha.x - 20, flecha.y, flecha.x + 20, flecha.y);
+    triangle(flecha.x, flecha.y + 20, flecha.x - 10, flecha.y, flecha.x + 10, flecha.y);
+    pop();
+*/
+    /*
+    //comentar para que desaparescan, bauti gaga
+     gestor.dibujar(100, height - altoGestor - 20);
+     gestorPitch.dibujar(100, height - altoGestor - 200);
+     */
+}
+
+//inicia el modelo de Machine Learning para deteccion de pitch (altura tonal)
+function startPitch() {
+  pitch = ml5.pitchDetection(model_url, audioContext , mic.stream, modelLoaded);
+}
+//--------------------------------------------------------------------
+function modelLoaded() {
+//select('#status').html('Model Loaded');
+getPitch();
+console.log( "entro aca !" );
+}
+//--------------------------------------------------------------------
+function getPitch() {
+  pitch.getPitch(function(err, frequency) {
+    //aca ingresa la frecuencia 'cruda'
+  if (frequency) {    	
+    //transforma la frevcuencia en nota musical
+    let numeroDeNota = freqToMidi(frequency);
+   console.log("Nota detectada:", numeroDeNota );
+
+    ultimaNotaDetectada = numeroDeNota; 
+    gestorPitch.actualizar( numeroDeNota );
+
+  }
+
+  getPitch();
+})
+}
