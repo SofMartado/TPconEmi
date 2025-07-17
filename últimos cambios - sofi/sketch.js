@@ -235,8 +235,35 @@ function isSpaceFree(x, y, w, h) {
     return true;
 }
 
+function resetJuego() {
+    // Reinicia variables principales
+    boxes = [];
+    lastBoxTime = 0;
+    crearCaja = false;
+    reiniciarJuego = false;
+    imgIndex = 0;
+    ultimaNotaDetectada = null;
+    gameState = "pantalla_inicial";
+    paletaSeleccionada = 0;
+
+    // Elimina cuerpos físicos
+    if (ground) Matter.World.remove(world, ground);
+    ground = Matter.Bodies.rectangle(400, height - 35, 810, 60, { isStatic: true });
+    Matter.World.add(world, ground);
+
+    // Reinicia física de pantalla inicial
+    crearFisicaPantallaInicial();
+}
+
 function draw() {
      background(255);
+
+    let umbralReset = 1.2; // ajusta según tu micro
+    if (gestor.derivada > umbralReset && cooldown === 0 && gameState === "juego") {
+        resetJuego();
+        cooldown = 30;
+        return;
+    }
 
     if (gameState === "pantalla_inicial") {
         background(150);
